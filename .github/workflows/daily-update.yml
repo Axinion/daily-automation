@@ -1,0 +1,60 @@
+name: Daily automated update
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-automated-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Append daily activity commits
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -Eeuo pipefail
+
+          fail() {
+            echo "::error::$1" >&2
+            exit 1
+          }
+
+          git config user.name "Axinion" || fail "Failed to configure Git user name."
+          git config user.email "mihirpaddy@gmail.com" || fail "Failed to configure Git user email."
+
+          commit_count=$((RANDOM % 4 + 2))
+          if (( commit_count < 2 || commit_count > 5 )); then
+            fail "Generated commit count (${commit_count}) is outside the allowed range of 2 to 5."
+          fi
+
+          run_identifier="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${RANDOM}"
+          for ((commit_number = 1; commit_number <= commit_count; commit_number++)); do
+            timestamp="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            printf -- '- %s — Automated activity %d of %d — Run %s\n' \
+              "$timestamp" "$commit_number" "$commit_count" "$run_identifier" \
+              >> daily-log.md || fail "Failed to update daily-log.md."
+
+            git add daily-log.md || fail "Failed to stage daily-log.md."
+            git commit -m "chore: daily automated update ${commit_number}/${commit_count}" \
+              || fail "Failed to create commit ${commit_number}/${commit_count}."
+
+            if (( commit_number < commit_count )); then
+              sleep "$((RANDOM % 5 + 1))"
+            fi
+          done
+
+          git push origin "HEAD:${DEFAULT_BRANCH}" || fail "Failed to push automated commits."
